@@ -9,7 +9,7 @@ use Getopt::Std;
 use Data::Dumper;
 
 my %options=();
-getopts("da:h:s:n:q:",\%options);
+getopts("da:h:s:n:q:w:c:",\%options);
 if (!$options{ n} || !$options{ q})
   {
       print "There are no options defined - run this script with :\n"; 
@@ -19,6 +19,8 @@ if (!$options{ n} || !$options{ q})
       print "     -a [api]  stain api server (optional)\n";
       print "     -h [host] stain dns-server hostname (optional)\n";
       print "     -s [srv]  stain service name (optional)\n";
+      print "     -w [difference] max difference between serials for warning (optional, default 5)\n";
+      print "     -c [difference] max difference between serials for critical (optional, default 10)\n";
       exit -1;
   }
 
@@ -27,6 +29,9 @@ my $errortext = "";
 
 ## Get domain name from user.
 my $domain     = $options{ n};
+my $warning    = $options{w} || 5;
+my $critical   = $options{c} || 10;
+my $level      = 0; ## return code
 my $objResolve = Net::DNS::Resolver->new;
 
 ## If debug requested, turn it on inside Net::DNS
@@ -75,11 +80,21 @@ foreach my $server (@nameservers)
       {
         my $childserial = $rr->serial;
         print "Serial number from $server is $childserial\n" if $options{ d};
-        if ($childserial != $master)
-          {
-            $errors++;
-            $errortext .= "$server serves Serial $childserial not $master  ";
-          }
+#        if ($childserial != $master)
+#          {
+	    my $diff = abs ($childserial-$master);
+	    print "compare $diff with warning $warning and critical $critical values\n" if $options{ d};
+	    if ($diff gt $critical) {
+	        $level = 2;
+                $errors++;
+	      }
+	    elsif ($diff gt $warning)
+	      {
+	        $level = 1 if ($level lt 1);
+                $errors++;
+	      }
+            $errortext .= "$server serves Serial $childserial not $master  " if ($diff gt 0);
+#          }
       }
   }
 
@@ -90,7 +105,6 @@ foreach my $server (@nameservers)
 if ($errors gt 0)
   {
     $errortext .= " ($errors errors).\n";
-    $errors     = 2;
   } else {
     $errortext  = "Everything OK testing domain $options{ n}.\n";
   }
@@ -114,5 +128,7 @@ if ($options{ a})
     SubmitCheckResults::send(%tosend); 
   }
 
+print $level==2?"CRITICAL":($level==1?"WARNING":"OK");
+print ": ";
 print $errortext;
-exit $errors;
+exit $level;
